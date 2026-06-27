@@ -1,30 +1,25 @@
 export default async (request, context) => {
   const urlObj = new URL(request.url);
-  const pathname = urlObj.pathname; // Mengambil /api/proxy/https://...
+  
+  // 1. Ambil URL target langsung dari query parameter '?url='
+  let targetUrl = urlObj.searchParams.get("url");
 
-  // 1. Ambil URL asli langsung dari path setelah '/api/proxy/'
-  let targetUrl = pathname.replace("/api/proxy/", "");
-
-  // Jika kosong, berikan response bad request
-  if (!targetUrl || targetUrl === "/") {
-    return new Response("Error: Missing target URL parameter.", { status: 400 });
+  // Jika parameter url tidak ada, berikan response error
+  if (!targetUrl) {
+    return new Response("Error: Missing 'url' query parameter. Usage: /api/proxy?url=HTTPS_URL", { status: 400 });
   }
 
-  // Fix jika ada double slash akibat rewrite router (http:/ menjadi http://)
-  if (targetUrl.startsWith("http:/") && !targetUrl.startsWith("http://")) {
-    targetUrl = targetUrl.replace("http:/", "http://");
-  } else if (targetUrl.startsWith("https:/") && !targetUrl.startsWith("https://")) {
-    targetUrl = targetUrl.replace("https:/", "https://");
-  }
-
-  // 2. Gandeng kembali query string bawaan player jika ada (seperti token atau nama segmen)
-  if (urlObj.search) {
-    targetUrl += urlObj.search;
+  // 2. Jika ada query string tambahan dari player selain 'url', gabungkan kembali
+  // (Sangat penting untuk membawa token atau hash biner stream)
+  urlObj.searchParams.delete("url"); 
+  const remainingSearchParams = urlObj.searchParams.toString();
+  if (remainingSearchParams) {
+    targetUrl += (targetUrl.includes("?") ? "&" : "?") + remainingSearchParams;
   }
 
   // Validasi URL sah
   if (!targetUrl.startsWith("http://") && !targetUrl.startsWith("https://")) {
-    return new Response("Error: Invalid URL format. Received: " + targetUrl, { status: 400 });
+    return new Response("Error: Invalid URL format. Must start with http/https.", { status: 400 });
   }
 
   try {
@@ -42,7 +37,7 @@ export default async (request, context) => {
       forwardHeaders.set("Origin", "https://www.starhub.com");
     }
 
-    // 4. Ambil data dari server target (bisa berupa manifest teks atau segmen video biner)
+    // 4. Ambil data dari server target
     const targetResponse = await fetch(targetUrl, {
       method: request.method,
       headers: forwardHeaders,
@@ -52,7 +47,7 @@ export default async (request, context) => {
 
     const responseBody = await targetResponse.arrayBuffer();
 
-    // 5. Inject CORS Header agar bisa diputar di OTT Navigator / Player
+    // 5. Inject CORS Header agar bisa diputar di Player
     const responseHeaders = new Headers(targetResponse.headers);
     responseHeaders.set("Access-Control-Allow-Origin", "*");
     responseHeaders.set("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
